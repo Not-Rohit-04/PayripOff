@@ -1,0 +1,12 @@
+[project]
+name = "payripoff"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "fastapi[standard]>=0.153.0",
+    "python-dotenv>=1.2.4",
+    "uvicorn>=0.54.0",
+]
