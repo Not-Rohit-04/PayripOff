@@ -136,6 +136,6 @@ async def create_db_and_table():
         await connection.run_sync(Base.metadata.create_all)
         
 async def get_async_session() -> AsyncGenerator[AsyncSession,None]:
-    async with async_session_maker as session:
+    async with async_session_maker() as session:
         yield session
         
