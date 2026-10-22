@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+
+load_dotenv()
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
