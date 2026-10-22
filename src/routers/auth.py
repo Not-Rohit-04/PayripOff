@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_async_session, User
-from ..schemas import UserResponse, CreateUser
-from ..security import hash_password
+from ..schemas import UserResponse, CreateUser, UserLogin
+from ..security import hash_password, verify_password
 from sqlalchemy import select
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -38,3 +38,19 @@ async def register_user(
     await session.commit()
     await session.refresh(new_user)
     return new_user
+
+
+@router.post("/login", status_code=status.HTTP_200_OK)
+async def login_user(
+    user_data: UserLogin, session: AsyncSession = Depends(get_async_session)
+):
+    result = await session.execute(select(User).where(User.email == user_data.email))
+
+    user = result.scalar_one_or_none()
+
+    if user is None or not verify_password(user_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
+        )
+
+    return {"message": "Login successful", "user_id": str(user.id)}
