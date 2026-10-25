@@ -22,3 +22,19 @@ class UserLogin(BaseModel):
 
     email: EmailStr
     password: str
+
+
+class CreateGroup(BaseModel):
+
+    name: str = Field(min_length=1, max_length=150)
+    description: str | None = None
+
+
+class GroupResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    description: str | None
+    created_by_id: UUID
+    created_at: datetime
