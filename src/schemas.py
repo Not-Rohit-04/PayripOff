@@ -38,3 +38,7 @@ class GroupResponse(BaseModel):
     description: str | None
     created_by_id: UUID
     created_at: datetime
+
+
+class AddGroupMember(BaseModel):
+    username: str = Field(min_length=1, max_length=50)
