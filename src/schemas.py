@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from uuid import UUID
 from datetime import datetime
+from decimal import Decimal
 
 
 class CreateUser(BaseModel):
@@ -42,3 +43,19 @@ class GroupResponse(BaseModel):
 
 class AddGroupMember(BaseModel):
     username: str = Field(min_length=1, max_length=50)
+
+
+class CreateExpense(BaseModel):
+    description: str = Field(min_length=1, max_length=250)
+    amount: Decimal = Field(gt=0, max_digits=10, decimal_places=2)
+    participant_usernames: list[str] = Field(min_length=1)
+
+
+class ExpenseResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    group_id: UUID
+    description: str
+    amount: Decimal
+    created_at: datetime
