@@ -85,47 +85,63 @@ async def add_group_member(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
-    membership_result = await session.execute(
+    querry_requester_verify = await session.execute(
         select(GroupMember).where(
             GroupMember.group_id == group_id, GroupMember.member_id == current_user.id
         )
     )
-    membership = membership_result.scalar_one_or_none()
 
-    if membership is None:
+    if querry_requester_verify.scalar_one_or_none() is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Group not Found"
         )
 
-    user_result = await session.execute(
-        select(User).where(User.username == member_data.username)
+    usernames = member_data.username
+
+    # reject duplicate user
+
+    if len(usernames) != len(set(usernames)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Duplicate username in request",
+        )
+
+    querry_users_find = await session.execute(
+        select(User).where(User.username.in_(usernames))
     )
 
-    user_to_add = user_result.scalar_one_or_none()
+    user_by_name = {user.username: user for user in querry_users_find.scalars().all()}
 
-    if user_to_add is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
-
-    existing__user = await session.execute(
-        select(GroupMember).where(
-            GroupMember.group_id == group_id, GroupMember.member_id == user_to_add.id
+    querry_existing_users = await session.execute(
+        select(GroupMember.member_id).where(
+            GroupMember.group_id == group_id,
+            GroupMember.member_id.in_([user.id for user in user_by_name.values()]),
         )
     )
 
-    existing_result = existing__user.scalar_one_or_none()
+    existing_ids = set(querry_existing_users.scalars().all())
 
-    if existing_result is not None:
+    added, already_member, not_found = [], [], []
 
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="User already exists in the group.",
-        )
+    for username in usernames:
+        user = user_by_name.get(username)
 
-    new_member = GroupMember(group_id=group_id, member_id=user_to_add.id)
+        if user is None:
+            not_found.append(user)
+        elif user.id in existing_ids:
+            already_member.append(user)
+        else:
+            session.add(GroupMember(group_id=group_id, member_id=user.id))
+            added.append(user)
 
-    session.add(new_member)
-    await session.commit()
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
 
-    return {"message": f"{user_to_add.username} added to the group"}
+    return {
+        "added": added,
+        "already_members": already_member,
+        "not_found": not_found,
+    }

@@ -42,7 +42,7 @@ class GroupResponse(BaseModel):
 
 
 class AddGroupMember(BaseModel):
-    username: str = Field(min_length=1, max_length=50)
+    username: list[str] = Field(min_length=1)
 
 
 class CreateExpense(BaseModel):
