@@ -3,7 +3,12 @@ from fastapi import Depends, status, HTTPException, APIRouter
 from decimal import Decimal, ROUND_DOWN
 from ..db import User, Group, GroupMember, Expense, ExpenseShare, get_async_session
 from ..dependencies import get_current_user
-from ..schemas import ExpenseResponse, CreateExpense, GroupMemberBalance
+from ..schemas import (
+    ExpenseResponse,
+    CreateExpense,
+    GroupMemberBalance,
+    SettlementSuggestion,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -111,7 +116,7 @@ async def get_groups_expense(
 
 
 async def calculate_group_expenses(
-    group_id=UUID,
+    group_id: UUID,
     session: AsyncSession = Depends(get_async_session),
 ) -> list[GroupMemberBalance]:
 
@@ -155,8 +160,6 @@ async def calculate_group_expenses(
 
     return balances
 
-    pass
-
 
 @router.get("/{group_id}/balances", response_model=list[GroupMemberBalance])
 async def get_group_balance(
@@ -175,7 +178,67 @@ async def get_group_balance(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=" Group not found"
         )
-        
-    balances = await calculate_group_expenses(session=session,group_id=group_id)
-    
+
+    balances = await calculate_group_expenses(session=session, group_id=group_id)
+
     return balances
+
+
+@router.get("/{group_id}/settlements", response_model=list[SettlementSuggestion])
+async def get_group_settlements(
+    group_id: UUID,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
+):
+    querry_verify_user = await session.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id, GroupMember.member_id == current_user.id
+        )
+    )
+    result_verify_user = querry_verify_user.scalar_one_or_none()
+
+    if result_verify_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found"
+        )
+
+    balances = await calculate_group_expenses(session=session, group_id=group_id)
+
+    creditors = [member for member in balances if member.net_balance > 0]
+    debtors = [member for member in balances if member.net_balance < 0]
+
+    settlements = []
+
+    debtor_index = 0
+    creditor_index = 0
+    remaining_debts = {member.user_id: abs(member.net_balance) for member in debtors}
+    remaining_credits = {member.user_id: member.net_balance for member in creditors}
+
+    while debtor_index < len(debtors) and creditor_index < len(creditors):
+        creditor = creditors[creditor_index]
+        debtor = debtors[debtor_index]
+
+        transfer_amt = min(
+            remaining_debts[debtor.user_id], remaining_credits[creditor.user_id]
+        )
+
+        settlements.append(
+            SettlementSuggestion(
+                from_user=debtor.user_id,
+                from_username=debtor.username,
+                to_user=creditor.user_id,
+                to_username=creditor.username,
+                amount=transfer_amt,
+            )
+        )
+
+        remaining_debts[debtor.user_id] -= transfer_amt
+        remaining_credits[creditor.user_id] -= transfer_amt
+
+        if remaining_debts[debtor.user_id] == Decimal("0.00"):
+            debtor_index += 1
+
+        if remaining_credits[creditor.user_id] == Decimal("0.00"):
+            creditor_index += 1
+
+    return settlements

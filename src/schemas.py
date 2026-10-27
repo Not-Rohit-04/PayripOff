@@ -67,3 +67,11 @@ class GroupMemberBalance(BaseModel):
     total_paid: Decimal
     total_owed: Decimal
     net_balance: Decimal
+
+
+class SettlementSuggestion(BaseModel):
+    from_user: UUID
+    from_username: str
+    to_user: UUID
+    to_username: str
+    amount: Decimal
