@@ -79,3 +79,32 @@ async def create_expense(
     await session.refresh(new_expense)
 
     return new_expense
+
+
+@router.get("/groups/{group_id}/expenses", response_model=list[ExpenseResponse])
+async def get_groups_expense(
+    group_id: UUID,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
+):
+    querry_membership = await session.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id, GroupMember.member_id == current_user.id
+        )
+    )
+    membership_result = querry_membership.scalar_one_or_none()
+
+    if membership_result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found"
+        )
+
+    querry_for_expenses = await session.execute(
+        select(Expense)
+        .where(Expense.group_id == group_id)
+        .order_by(Expense.created_at.desc())
+    )
+
+    expenses = querry_for_expenses.scalars().all()
+
+    return expenses
