@@ -110,23 +110,10 @@ async def get_groups_expense(
     return expenses
 
 
-@router.get("/{group_id}/balances", response_model=list[GroupMemberBalance])
-async def get_group_balance(
-    group_id: UUID,
+async def calculate_group_expenses(
+    group_id=UUID,
     session: AsyncSession = Depends(get_async_session),
-    current_user: User = Depends(get_current_user),
-):
-    querry_verify = await session.execute(
-        select(GroupMember).where(
-            GroupMember.group_id == group_id, GroupMember.member_id == current_user.id
-        )
-    )
-    querry_verify_result = querry_verify.scalar_one_or_none()
-
-    if querry_verify_result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=" Group not found"
-        )
+) -> list[GroupMemberBalance]:
 
     querry_all_member = await session.execute(
         select(User)
@@ -166,4 +153,29 @@ async def get_group_balance(
             )
         )
 
+    return balances
+
+    pass
+
+
+@router.get("/{group_id}/balances", response_model=list[GroupMemberBalance])
+async def get_group_balance(
+    group_id: UUID,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
+):
+    querry_verify = await session.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id, GroupMember.member_id == current_user.id
+        )
+    )
+    querry_verify_result = querry_verify.scalar_one_or_none()
+
+    if querry_verify_result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=" Group not found"
+        )
+        
+    balances = await calculate_group_expenses(session=session,group_id=group_id)
+    
     return balances
