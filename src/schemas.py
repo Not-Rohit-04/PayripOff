@@ -59,3 +59,11 @@ class ExpenseResponse(BaseModel):
     description: str
     amount: Decimal
     created_at: datetime
+
+
+class GroupMemberBalance(BaseModel):
+    user_id: UUID
+    username: str
+    total_paid: Decimal
+    total_owed: Decimal
+    net_balance: Decimal

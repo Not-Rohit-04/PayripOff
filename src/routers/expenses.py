@@ -3,9 +3,9 @@ from fastapi import Depends, status, HTTPException, APIRouter
 from decimal import Decimal, ROUND_DOWN
 from ..db import User, Group, GroupMember, Expense, ExpenseShare, get_async_session
 from ..dependencies import get_current_user
-from ..schemas import ExpenseResponse, CreateExpense
+from ..schemas import ExpenseResponse, CreateExpense, GroupMemberBalance
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 router = APIRouter(tags=["Expenses"])
 
@@ -108,3 +108,62 @@ async def get_groups_expense(
     expenses = querry_for_expenses.scalars().all()
 
     return expenses
+
+
+@router.get("/{group_id}/balances", response_model=list[GroupMemberBalance])
+async def get_group_balance(
+    group_id: UUID,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
+):
+    querry_verify = await session.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id, GroupMember.member_id == current_user.id
+        )
+    )
+    querry_verify_result = querry_verify.scalar_one_or_none()
+
+    if querry_verify_result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=" Group not found"
+        )
+
+    querry_all_member = await session.execute(
+        select(User)
+        .join(GroupMember, User.id == GroupMember.member_id)
+        .where(GroupMember.group_id == group_id)
+    )
+    members = querry_all_member.scalars().all()
+
+    querry_total_paid = await session.execute(
+        select(Expense.paid_by_id, func.sum(Expense.amount))
+        .where(Expense.group_id == group_id)
+        .group_by(Expense.paid_by_id)
+    )
+    paid_totals = dict(querry_total_paid.all())
+
+    querry_total_owed = await session.execute(
+        select(ExpenseShare.user_id, func.sum(ExpenseShare.amount_owed))
+        .join(Expense, ExpenseShare.expense_id == Expense.id)
+        .where(Expense.group_id == group_id)
+        .group_by(ExpenseShare.user_id)
+    )
+    owed_totals = dict(querry_total_owed.all())
+
+    balances = []
+
+    for member in members:
+        total_paid = paid_totals.get(member.id, Decimal("0.00"))
+        total_owed = owed_totals.get(member.id, Decimal("0.00"))
+
+        balances.append(
+            GroupMemberBalance(
+                user_id=member.id,
+                username=member.username,
+                total_paid=total_paid,
+                total_owed=total_owed,
+                net_balance=total_paid - total_owed,
+            )
+        )
+
+    return balances
