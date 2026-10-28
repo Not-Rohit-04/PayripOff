@@ -1,13 +1,23 @@
 from uuid import UUID
 from fastapi import Depends, status, HTTPException, APIRouter
 from decimal import Decimal, ROUND_DOWN
-from ..db import User, Group, GroupMember, Expense, ExpenseShare, get_async_session
+from ..db import (
+    User,
+    Group,
+    GroupMember,
+    Expense,
+    ExpenseShare,
+    Settlement,
+    get_async_session,
+)
 from ..dependencies import get_current_user
 from ..schemas import (
     ExpenseResponse,
     CreateExpense,
     GroupMemberBalance,
     SettlementSuggestion,
+    SettlementResponse,
+    CreateSettlement,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -142,11 +152,27 @@ async def calculate_group_expenses(
     )
     owed_totals = dict(querry_total_owed.all())
 
+    querry_settlements_sent = await session.execute(
+        select(Settlement.from_user_id, func.sum(Settlement.amount_transferred))
+        .where(Settlement.group_id == group_id)
+        .group_by(Settlement.from_user_id)
+    )
+    settlements_sent = dict(querry_settlements_sent.all())
+
+    querry_settlements_recieved = await session.execute(
+        select(Settlement.to_user_id, func.sum(Settlement.amount_transferred))
+        .where(Settlement.group_id == group_id)
+        .group_by(Settlement.to_user_id)
+    )
+
+    settlements_recieved = dict(querry_settlements_recieved.all())
     balances = []
 
     for member in members:
         total_paid = paid_totals.get(member.id, Decimal("0.00"))
         total_owed = owed_totals.get(member.id, Decimal("0.00"))
+        total_sent = settlements_sent.get(member.id, Decimal("0.00"))
+        total_recieved = settlements_recieved.get(member.id, Decimal("0.00"))
 
         balances.append(
             GroupMemberBalance(
@@ -154,7 +180,7 @@ async def calculate_group_expenses(
                 username=member.username,
                 total_paid=total_paid,
                 total_owed=total_owed,
-                net_balance=total_paid - total_owed,
+                net_balance=total_paid - total_owed + total_sent - total_recieved,
             )
         )
 
@@ -242,3 +268,74 @@ async def get_group_settlements(
             creditor_index += 1
 
     return settlements
+
+
+@router.post(
+    "/{group_id}/settlements/{to_user_id}",
+    response_model=SettlementResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_settlement(
+    group_id: UUID,
+    to_user_id: UUID,
+    settelment_data: CreateSettlement,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
+):
+    check_users_querry = await session.execute(
+        select(GroupMember.member_id).where(
+            GroupMember.group_id == group_id,
+            GroupMember.member_id.in_([current_user.id, to_user_id]),
+        )
+    )
+    members_ids = set(check_users_querry.scalars().all())
+    if current_user.id == to_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Can't settle with yourself"
+        )
+    if members_ids != {current_user.id, to_user_id}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Both users must belong to the group",
+        )
+    balances = await calculate_group_expenses(session=session, group_id=group_id)
+    sender_balance = next(
+        (balance for balance in balances if balance.user_id == current_user.id), None
+    )
+    reciver_balance = next(
+        (balance for balance in balances if balance.user_id == to_user_id), None
+    )
+
+    if sender_balance is None or reciver_balance is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not find both users' balances in this group",
+        )
+    if sender_balance.net_balance >= 0 or reciver_balance.net_balance <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sender must owe money and recipient must be owed money",
+        )
+
+    if (
+        settelment_data.amount > abs(sender_balance.net_balance)
+        or settelment_data.amount > reciver_balance.net_balance
+    ):
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Settlement amount exceeds the outstanding balance",
+        )
+
+    new_settlement = Settlement(
+        group_id=group_id,
+        from_user_id=current_user.id,
+        to_user_id=to_user_id,
+        amount_transferred=settelment_data.amount,
+    )
+
+    session.add(new_settlement)
+    await session.commit()
+    await session.refresh(new_settlement)
+
+    return new_settlement

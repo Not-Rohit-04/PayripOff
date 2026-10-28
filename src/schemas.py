@@ -75,3 +75,18 @@ class SettlementSuggestion(BaseModel):
     to_user: UUID
     to_username: str
     amount: Decimal
+
+
+class CreateSettlement(BaseModel):
+    amount: Decimal = Field(gt=0, max_digits=10, decimal_places=2)
+
+
+class SettlementResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    group_id: UUID
+    from_user_id: UUID
+    to_user_id: UUID
+    amount_transferred: Decimal
+    created_at: datetime
