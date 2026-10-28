@@ -45,6 +45,12 @@ class User(Base):
     group_memberships: Mapped[list["GroupMember"]] = relationship(
         "GroupMember", back_populates="user"
     )
+    settlement_sent: Mapped[list["Settlement"]] = relationship(
+        "Settlement", foreign_keys="Settlement.from_user_id", back_populates="from_user"
+    )
+    settlement_recieved: Mapped[list["Settlement"]] = relationship(
+        "Settlement", foreign_keys="Settlement.to_user_id", back_populates="to_user"
+    )
 
 
 class Group(Base):
@@ -127,15 +133,53 @@ class ExpenseShare(Base):
     user: Mapped[User] = relationship("User", back_populates="expense_shares")
     expense: Mapped[Expense] = relationship("Expense", back_populates="shares")
 
+
+class Settlement(Base):
+    __tablename__ = "settlements"
+    __table_args__ = (CheckConstraint("from_user_id != to_user_id"),)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False
+    )
+    from_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+    to_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+    amount_transferred: Mapped[Decimal] = mapped_column(
+        Numeric(precision=10, scale=2),
+        CheckConstraint("amount_transferred > 0"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    from_user: Mapped[User] = relationship(
+        "User", foreign_keys=[from_user_id], back_populates="settlement_sent"
+    )
+    to_user: Mapped[User] = relationship(
+        "User", foreign_keys=[to_user_id], back_populates="settlement_recieved"
+    )
+
+
 engin = create_async_engine(database_url)
 
-async_session_maker = async_sessionmaker(engin,expire_on_commit=False)
+async_session_maker = async_sessionmaker(engin, expire_on_commit=False)
+
 
 async def create_db_and_table():
     async with engin.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
-        
-async def get_async_session() -> AsyncGenerator[AsyncSession,None]:
+
+
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_maker() as session:
         yield session
-        
