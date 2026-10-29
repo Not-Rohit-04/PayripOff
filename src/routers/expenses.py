@@ -339,3 +339,39 @@ async def create_settlement(
     await session.refresh(new_settlement)
 
     return new_settlement
+
+
+@router.get(
+    "/groups/{group_id}/expenses/{expense_id}",
+    response_model=ExpenseResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_expense(
+    group_id: UUID,
+    expense_id: UUID,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
+):
+    querry_membership = await session.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id, current_user.id == GroupMember.member_id
+        )
+    )
+    result_querry_membership = querry_membership.scalar_one_or_none()
+
+    if result_querry_membership is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found"
+        )
+
+    querry_expenses_verify = await session.execute(
+        select(Expense).where(Expense.group_id == group_id, Expense.id == expense_id)
+    )
+    result_expense_verify = querry_expenses_verify.scalar_one_or_none()
+
+    if result_expense_verify is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Expense not in the group "
+        )
+
+    return result_expense_verify
