@@ -18,6 +18,7 @@ from ..schemas import (
     SettlementSuggestion,
     SettlementResponse,
     CreateSettlement,
+    UpdateExpense,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -375,3 +376,88 @@ async def get_expense(
         )
 
     return result_expense_verify
+
+
+@router.put(
+    "/groups/{group_id}/expenses/{expense_id}",
+    response_model=ExpenseResponse,
+)
+async def update_expense(
+    group_id: UUID,
+    expense_id: UUID,
+    expense_data: UpdateExpense,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
+):
+    querry_membership = await session.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id, GroupMember.member_id == current_user.id
+        )
+    )
+    result_membership = querry_membership.scalar_one_or_none()
+
+    if result_membership is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found"
+        )
+
+    querry_expense = await session.execute(
+        select(Expense).where(Expense.id == expense_id, Expense.group_id == group_id)
+    )
+
+    expense = querry_expense.scalar_one_or_none()
+
+    if expense is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Requested expense not found"
+        )
+
+    if current_user.id != expense.paid_by_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Requested expense not found"
+        )
+
+    querry_settlement = await session.execute(
+        select(Settlement.id).where(Settlement.group_id == group_id).limit(1)
+    )
+
+    existing_settlement = querry_settlement.scalar_one_or_none()
+
+    if existing_settlement is not None and expense_data.amount != expense.amount:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot change expense amount after a settlement has been recorded in this group",
+        )
+
+    expnse_share = await session.execute(
+        select(ExpenseShare).where(ExpenseShare.expense_id == expense.id)
+    )
+    shares = expnse_share.scalars().all()
+
+    participants = [share.user_id for share in shares]
+
+    if not participants:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Participants not found"
+        )
+
+    total_paise = int(expense_data.amount * 100)
+    participant_count = len(participants)
+
+    base_share, remainder = divmod(total_paise, participant_count)
+
+    for i, share in enumerate(shares):
+        share_paise = base_share + (1 if i < remainder else 0)
+
+        share.amount_owed = Decimal(share_paise) / 100
+
+    expense.amount = expense_data.amount
+    expense.description = expense_data.description
+
+    try:
+        await session.commit()
+        await session.refresh(expense)
+    except Exception:
+        await session.rollback()
+        raise
+    return expense

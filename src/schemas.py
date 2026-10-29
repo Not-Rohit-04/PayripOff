@@ -90,3 +90,8 @@ class SettlementResponse(BaseModel):
     to_user_id: UUID
     amount_transferred: Decimal
     created_at: datetime
+
+
+class UpdateExpense(BaseModel):
+    description: str = Field(min_length=1, max_length=250)
+    amount: Decimal = Field(gt=0, max_digits=10, decimal_places=2)
