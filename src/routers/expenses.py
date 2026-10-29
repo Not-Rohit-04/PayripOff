@@ -21,7 +21,7 @@ from ..schemas import (
     UpdateExpense,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import delete, select, func
 
 router = APIRouter(tags=["Expenses"])
 
@@ -461,3 +461,63 @@ async def update_expense(
         await session.rollback()
         raise
     return expense
+
+
+@router.delete(
+    "/groups/{group_id}/expenses/{expense_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_expense(
+    group_id: UUID,
+    expense_id: UUID,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
+):
+    querry_verify_member = await session.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id, GroupMember.member_id == current_user.id
+        )
+    )
+    result_verify = querry_verify_member.scalar_one_or_none()
+
+    if result_verify is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found"
+        )
+
+    expense_querry = await session.execute(
+        select(Expense).where(Expense.id == expense_id, Expense.group_id == group_id)
+    )
+    expense = expense_querry.scalar_one_or_none()
+
+    if expense is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Requested expense not found"
+        )
+
+    if current_user.id != expense.paid_by_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Requested expense not found"
+        )
+
+    querry_settlement = await session.execute(
+        select(Settlement.id).where(Settlement.group_id == group_id).limit(1)
+    )
+    existing_settlement = querry_settlement.scalar_one_or_none()
+
+    if existing_settlement is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete expense after a settlement has been recorded in this group",
+        )
+
+    await session.execute(
+        delete(ExpenseShare).where(ExpenseShare.expense_id == expense_id)
+    )
+
+    await session.delete(expense)
+
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
