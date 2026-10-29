@@ -187,7 +187,7 @@ async def calculate_group_expenses(
     return balances
 
 
-@router.get("/{group_id}/balances", response_model=list[GroupMemberBalance])
+@router.get("/groups/{group_id}/balances", response_model=list[GroupMemberBalance])
 async def get_group_balance(
     group_id: UUID,
     session: AsyncSession = Depends(get_async_session),
@@ -210,7 +210,7 @@ async def get_group_balance(
     return balances
 
 
-@router.get("/{group_id}/settlements", response_model=list[SettlementSuggestion])
+@router.get("/groups/{group_id}/settlements", response_model=list[SettlementSuggestion])
 async def get_group_settlements(
     group_id: UUID,
     session: AsyncSession = Depends(get_async_session),
@@ -271,7 +271,7 @@ async def get_group_settlements(
 
 
 @router.post(
-    "/{group_id}/settlements/{to_user_id}",
+    "/groups/{group_id}/settlements/{to_user_id}",
     response_model=SettlementResponse,
     status_code=status.HTTP_201_CREATED,
 )
