@@ -18,3 +18,8 @@ wheels/
 .env
 .env.*
 !.env.example
+
+# Pytest
+.pytest_cache/
+__pycache__/
+*.py[cod]
