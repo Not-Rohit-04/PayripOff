@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select
 from src.db import User
-from src.security import verify_password
+from src.security import verify_password, decode_access_token
 from uuid import UUID
 
 
@@ -132,3 +132,84 @@ async def test_password_is_hashed(client, db_session):
         verify_password(password="secure12345pass", hash_password=user.password_hash)
         == True
     )
+
+
+@pytest.mark.asyncio
+async def test_successful_login(client):
+    await client.post(
+        "/auth/register",
+        json={"username": "Rohit", "email": "abc@gmail.com", "password": "secure1234"},
+    )
+
+    response = await client.post(
+        "/auth/login", json={"email": "abc@gmail.com", "password": "secure1234"}
+    )
+
+    assert response.status_code == 200
+
+    response_data = response.json()
+
+    assert "access_token" in response_data
+    assert "token_type" in response_data
+    assert response_data["token_type"] == "bearer"
+
+
+@pytest.mark.asyncio
+async def test_incorrect_password(client):
+    await client.post(
+        "/auth/register",
+        json={"username": "Rohit", "email": "abc@gmail.com", "password": "secure1234"},
+    )
+
+    response = await client.post(
+        "/auth/login", json={"email": "abc@gmail.com", "password": "notpassword"}
+    )
+
+    assert response.status_code == 401
+
+    response_data = response.json()
+
+    assert response_data["detail"] == "Invalid email or password"
+
+
+@pytest.mark.asyncio
+async def test_non_registered_email(client):
+    response = await client.post(
+        "/auth/login", json={"email": "abc@gmail.com", "password": "secure12354"}
+    )
+
+    assert response.status_code == 401
+
+    response_data = response.json()
+
+    assert response_data["detail"] == "Invalid email or password"
+
+
+@pytest.mark.asyncio
+async def test_invalid_email(client):
+    response = await client.post(
+        "/auth/login", json={"email": "not an email", "password": "secure12354"}
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_JWT_validate(client, db_session):
+    await client.post(
+        "/auth/register",
+        json={"username": "Rohit", "email": "abc@gmail.com", "password": "secure12354"},
+    )
+    response = await client.post(
+        "/auth/login", json={"email": "abc@gmail.com", "password": "secure12354"}
+    )
+    assert response.status_code == 200
+    response_data = response.json()
+
+    result = await db_session.execute(select(User))
+
+    user = result.scalar_one()
+
+    payload = decode_access_token(token=response_data["access_token"])
+
+    assert payload["sub"] == str(user.id)
