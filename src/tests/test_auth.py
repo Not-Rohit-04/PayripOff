@@ -213,3 +213,73 @@ async def test_JWT_validate(client, db_session):
     payload = decode_access_token(token=response_data["access_token"])
 
     assert payload["sub"] == str(user.id)
+
+
+@pytest.mark.asyncio
+async def test_get_current_user(client):
+    await client.post(
+        "/auth/register",
+        json={"username": "Rohit", "email": "abc@gmail.com", "password": "secure12345"},
+    )
+
+    response = await client.post(
+        "/auth/login", json={"email": "abc@gmail.com", "password": "secure12345"}
+    )
+    assert response.status_code == 200
+    response_data = response.json()
+
+    access_token = response_data["access_token"]
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    response = await client.get("/auth/me", headers=headers)
+    response_data = response.json()
+
+    assert response.status_code == 200
+    assert response_data["username"] == "Rohit"
+    assert response_data["email"] == "abc@gmail.com"
+    assert "id" in response_data
+    assert "password" not in response_data
+    assert "password_hash" not in response_data
+
+
+@pytest.mark.asyncio
+async def test_missing_auth_token(client):
+    response = await client.get("/auth/me")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_invalid_auth_token(client):
+    headers = {"Authorization": f"Bearer invalid.bearer.token"}
+    response = await client.get("/auth/me", headers=headers)
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_user_identity_verify(client):
+    await client.post(
+        "/auth/register",
+        json={"username": "Rohit", "email": "abc@gmail.com", "password": "secure12345"},
+    )
+    await client.post(
+        "/auth/register",
+        json={"username": "BOB", "email": "abcd@gmail.com", "password": "secure12909"},
+    )
+    response = await client.post(
+        "/auth/login", json={"email": "abc@gmail.com", "password": "secure12345"}
+    )
+    assert response.status_code == 200
+    response_data = response.json()
+
+    access_token = response_data["access_token"]
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    response = await client.get("/auth/me", headers=headers)
+    response_data = response.json()
+
+    assert response_data["username"] == "Rohit"
+    assert response_data["email"] == "abc@gmail.com"
