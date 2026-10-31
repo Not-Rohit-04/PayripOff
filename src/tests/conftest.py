@@ -42,3 +42,22 @@ async def client(setup_test_db):
 async def db_session(setup_test_db):
     async with test_async_session_maker() as session:
         yield session
+
+
+@pytest_asyncio.fixture
+async def authenticated_client(client):
+    await client.post(
+        "/auth/register",
+        json={"username": "BOB", "email": "abc@gmail.com", "password": "secure12345"},
+    )
+
+    response = await client.post(
+        "/auth/login", json={"email": "abc@gmail.com", "password": "secure12345"}
+    )
+    assert response.status_code == 200
+    response_data = response.json()
+    token = response_data["access_token"]
+
+    headers = {"Authorization": f"Bearer {token}"}
+
+    return {"client": client, "token": token, "headers": headers}
